@@ -3,6 +3,9 @@
 {application, erateserver, [
         {description, "HTTP interface for ERater, universal rate limiter"},
         {id, "ERateServer"},
+        {vsn, "0.1"},
         {applications, [kernel, stdlib, erater, cowboy]},
-        {mod, {erateserver, []}}
+        {modules, []},
+        {mod, {erateserver, []}},
+        {registered, [erateserver]}
         ]}.
