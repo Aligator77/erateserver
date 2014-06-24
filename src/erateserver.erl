@@ -19,7 +19,7 @@ start() ->
 
 start(_, _) ->
     StartResult = erateserver_sup:start_link(),
-    start_server(conf(port, 8080), conf(pool_size, 100), conf(groups, [])),
+    {ok, _} = start_server(conf(port, 8080), conf(pool_size, 100), conf(groups, [])),
     StartResult.
 
 stop(_) ->
