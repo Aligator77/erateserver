@@ -19,22 +19,28 @@ start() ->
 
 start(_, _) ->
     StartResult = erateserver_sup:start_link(),
-    {ok, _} = start_server(conf(port, 8080), conf(pool_size, 100), conf(groups, [])),
+    {ok, _} = start_server(conf(port, 8080), conf(pool_size, 100), conf(groups, []), conf_hooks()),
     StartResult.
 
 stop(_) ->
     ok.
 
-start_server(_Port, _PoolSize, []) ->
+start_server(_Port, _PoolSize, [], _Hooks) ->
     ignore;
-start_server(Port, PoolSize, Groups) when is_list(Groups) ->
+start_server(Port, PoolSize, Groups, Hooks) when is_list(Groups) ->
     PathList = [configure_group(Group) || Group <- Groups],
     DefPath = {'_', erateserver_handler, []},
     Host = {'_', PathList ++ [DefPath]},
     Dispatch = cowboy_router:compile([Host]),
-    cowboy:start_http(?MODULE, PoolSize, [{port, Port}], [{env, [{dispatch, Dispatch}]}]).
+    cowboy:start_http(?MODULE, PoolSize, [{port, Port}], [{env, [{dispatch, Dispatch}]}] ++ Hooks).
 
 configure_group({GroupName, UrlSegment, GroupConfig}) ->
     erater:configure(GroupName, GroupConfig),
     PathMatch = "/" ++ UrlSegment ++ "/:counter_name", 
     {PathMatch, erateserver_handler, [GroupName]}.
+
+conf_hooks() ->
+    case conf(log_access, false) of
+        true -> [{onresponse, fun erateserver_log:access/4}];
+        false -> []
+    end.

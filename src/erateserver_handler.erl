@@ -6,9 +6,14 @@
 -export([handle/2]).
 -export([terminate/3]).
  
-init(_Type, Req, []) ->
+% init: track request number
+init(Type, Req, Options) ->
+    increment_rq_num(),
+    do_init(Type, Req, Options).
+
+do_init(_Type, Req, []) ->
     {ok, Req, wrong_path};
-init(_Type, Req, [GroupName]) ->
+do_init(_Type, Req, [GroupName]) ->
     {ok, Req, {erater, GroupName}}.
  
 handle(Req0, {erater, GroupName} = State) ->
@@ -27,3 +32,15 @@ handle(Req, wrong_path = State) ->
  
 terminate(_Reason, _Req, _State) ->
     ok.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Internals
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% We store request number in process dictionary because we have nothing else persistent
+increment_rq_num() ->
+    PrevRqNum = case get(rq_num) of
+        undefined -> 0;
+        ExistingNum -> ExistingNum
+    end,
+    put(rq_num, PrevRqNum + 1).
