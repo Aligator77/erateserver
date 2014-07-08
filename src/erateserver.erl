@@ -32,7 +32,9 @@ start_server(Port, PoolSize, Groups, Hooks) when is_list(Groups) ->
     DefPath = {'_', erateserver_handler, []},
     Host = {'_', PathList ++ [DefPath]},
     Dispatch = cowboy_router:compile([Host]),
-    cowboy:start_http(?MODULE, PoolSize, [{port, Port}], [{env, [{dispatch, Dispatch}]}] ++ Hooks).
+    Opts = [{max_keepalive, 100000}, {timeout, 300000}],
+    PoolOpts = [{port, Port}, {max_connections, 100000}],
+    cowboy:start_http(?MODULE, PoolSize, PoolOpts, [{env, [{dispatch, Dispatch}]}] ++ Hooks ++ Opts).
 
 configure_group({GroupName, UrlSegment, GroupConfig}) ->
     erater:configure(GroupName, GroupConfig),
