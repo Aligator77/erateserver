@@ -18,11 +18,13 @@ do_init(_Type, Req, [GroupName]) ->
  
 handle(Req0, {erater, GroupName} = State) ->
     {CounterName, Req} = cowboy_req:binding(counter_name, Req0),
-    {ok, Req2} = case erater:acquire(GroupName, CounterName, 0) of
+    {ok, Req2} = case erateserver_shard_proxy:acquire(GroupName, CounterName, 0) of
         {ok, _} ->
             cowboy_req:reply(200, [], [], Req);
         {error, overflow} ->
-            cowboy_req:reply(429, [], [], Req)
+            cowboy_req:reply(429, [], [], Req);
+        {error, unavailable} ->
+            cowboy_req:reply(503, [], [], Req)
     end,
     {ok, Req2, State};
 
