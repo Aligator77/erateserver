@@ -7,6 +7,8 @@
 
 -export([start/2, stop/1]).
 
+conf(port) ->
+    conf(port, 8080);
 conf(Key) ->
     {ok, Value} = application:get_env(?MODULE, Key),
     Value.
@@ -19,7 +21,7 @@ start() ->
 
 start(_, _) ->
     StartResult = erateserver_sup:start_link(),
-    {ok, _} = start_server(conf(port, 8080), conf(pool_size, 100), conf(groups, []), conf_hooks()),
+    {ok, _} = start_server(conf(port), conf(pool_size, 100), conf(groups, []), conf_hooks()),
     StartResult.
 
 stop(_) ->
@@ -29,8 +31,9 @@ start_server(_Port, _PoolSize, [], _Hooks) ->
     ignore;
 start_server(Port, PoolSize, Groups, Hooks) when is_list(Groups) ->
     PathList = [configure_group(Group) || Group <- Groups],
+    RPCList = [configure_rpc(Group) || Group <- Groups],
     DefPath = {'_', erateserver_handler, []},
-    Host = {'_', PathList ++ [DefPath]},
+    Host = {'_', PathList ++ RPCList ++ [DefPath]},
     Dispatch = cowboy_router:compile([Host]),
     Opts = [{max_keepalive, 100000}, {timeout, 300000}],
     PoolOpts = [{port, Port}, {max_connections, 100000}],
@@ -40,6 +43,11 @@ configure_group({GroupName, UrlSegment, GroupConfig}) ->
     erater:configure(GroupName, GroupConfig),
     PathMatch = "/" ++ UrlSegment ++ "/:counter_name", 
     {PathMatch, erateserver_handler, [GroupName]}.
+
+configure_rpc({GroupName, UrlSegment, GroupConfig}) ->
+    Shards = erater_config:shards(GroupConfig),
+    erateserver_sup:add_proxies(GroupName, Shards),
+    {"/rpc/" ++ UrlSegment, erateserver_subproto, GroupName}.
 
 conf_hooks() ->
     case conf(log_access, false) of
