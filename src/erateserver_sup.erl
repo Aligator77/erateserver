@@ -8,7 +8,7 @@
 -export([init/1]).
 
 proxies_name(Group) ->
-    list_to_atom(atom_to_list(Group) ++ "_proxies").
+    list_to_atom(atom_to_list(Group) ++ "_s_proxies").
 
 start_link() ->
     supervisor:start_link({local, erateserver}, ?MODULE, app_root).
