@@ -20,6 +20,7 @@ start() ->
     ok.
 
 start(_, _) ->
+    erateserver_config:load(conf(config)),
     StartResult = erateserver_sup:start_link(),
     {ok, _} = start_server(conf(port), conf(pool_size, 100), conf(groups, []), conf_hooks()),
     StartResult.
