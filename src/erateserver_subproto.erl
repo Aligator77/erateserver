@@ -6,14 +6,16 @@
 -behavior(cowboy_sub_protocol).
 -export([upgrade/4]).
 
--export([receiver/5, responder/1]).
+-export([receiver/1, responder/1]).
 
 -export([client_connect/3, acquire/3, respond/3, sync_respond/3, handle_message/1]).
 -export([send_ping/1]).
--export([send_acquire_request/3]). % debug
+-export([send_acquire_request/3, send_acquire_request/4]).
+
+-export([strip_pid/1, restore_pid/1, strip_ref/1, restore_ref/1]).
 
 -define(PROTO, <<"erateserver">>).
--define(SOCK_OPTS, [{packet, 2}, {mode, binary}, {delay_send,true}, {nodelay, true}, {high_watermark, 32768}, {high_msgq_watermark, 32768}, {priority, 4}, {send_timeout, 1000}, {send_timeout_close, true}]).
+-define(SOCK_OPTS, [{packet, 2}, {mode, binary}, {delay_send, true}, {nodelay, true}, {sndbuf, 16384}, {recbuf, 16384}, {send_timeout, 500}, {send_timeout_close, true}]).
 
 init(_, _, _) ->
     {upgrade, protocol, ?MODULE}.
@@ -34,6 +36,23 @@ upgrade(Req, _Env, ?MODULE, Group) when is_atom(Group) ->
 	{ok, [?PROTO], Req3} = cowboy_req:parse_header(<<"upgrade">>, Req2),
     do_upgrade(Req3, Group).
 
+-define(ACK_EVERY, 500).
+-define(ACK_AFTER, 300).
+
+-record(rcv, {
+        group,
+        transport, socket,
+        responder, respond_path,
+        ack_ref, ack_after = ?ACK_EVERY
+        }).
+
+-record(rsp, {
+        receiver,
+        respond_path,
+        ack_ref, ack_after = ?ACK_AFTER
+        }).
+
+
 do_upgrade(Req, Group) ->
     % Send upgrade to the client
     {ok, _Req2} = cowboy_req:upgrade_reply(101, [{<<"upgrade">>, ?PROTO}], Req),
@@ -44,24 +63,54 @@ do_upgrade(Req, Group) ->
     Transport:setopts(Socket, [{active, true} | ?SOCK_OPTS]),
 
     RespondPath = {Transport, Socket, slots_to_millis(1, Group)},
-    Responder = proc_lib:spawn_opt(?MODULE, responder, [RespondPath], [link]),
-    receiver(Transport, Socket, Group, Responder, RespondPath).
+    Rsp = #rsp{receiver=self(), respond_path=RespondPath},
+    Responder = proc_lib:spawn_opt(?MODULE, responder, [Rsp], [link]),
+    Rcv = #rcv{group=Group, transport=Transport, socket=Socket, responder=Responder, respond_path = RespondPath},
+    receiver(Rcv).
 
 
-receiver(Transport, Socket, Group, Responder, RespondPath) ->
-    {_, MQL} = process_info(self(), message_queue_len),
-    (MQL =< 5) andalso Transport:setopts(Socket, [{active, 50}]),
+handle_rcv_mql(MQL, #rcv{} = Rcv) when MQL > 5 ->
+    Rcv;
+handle_rcv_mql(_MQL, #rcv{transport=Transport, socket=Socket} = Rcv) ->
+    Transport:setopts(Socket, [{active, 50}]),
+    Rcv.
+
+handle_rcv_data(<<0:16/integer, 1:16/integer, Ref/binary>>, #rcv{responder = Responder} = Rcv) -> % Ping request
+    Responder ! {pong, Ref},
+    Rcv;
+handle_rcv_data(<<NameLen:16/integer, CounterName:NameLen/binary, MaxWait:32/integer, Ref/binary>>, #rcv{group = Group, responder = Responder, ack_after = AA} = Rcv) ->
+    %erater:local_async_acquire(Group, CounterName, MaxWait, {mfa, ?MODULE, respond, [Ref, RespondPath]}); % direct socket write
+    %erater:local_async_acquire(Group, CounterName, MaxWait, {mfa, ?MODULE, sync_respond, [Ref, Responder]}); % counter waits for response to be sent
+    erater:local_async_acquire(Group, CounterName, MaxWait, {Responder, Ref}),
+    Rcv#rcv{ack_after = AA - 1}.
+
+rq_new_ack(#rcv{responder = Responder} = Rcv) ->
+    NewRef = make_ref(), % os:timestamp(),
+    Responder ! {ack_request, NewRef},
+    Rcv#rcv{ack_after = ?ACK_EVERY, ack_ref = NewRef}.
+
+receiver(#rcv{ack_after = AA, ack_ref = Ref} = Rcv) when AA =< 0 ->
     receive
-        {_Proto, Socket, <<0:16/integer, 1:16/integer, Ref/binary>>} -> % Ping request
-            respond(pong, Ref, RespondPath);
-        {_Proto, Socket, <<NameLen:16/integer, CounterName:NameLen/binary, MaxWait:32/integer, Ref/binary>>} ->
-            %erater:local_async_acquire(Group, CounterName, MaxWait, {mfa, ?MODULE, respond, [Ref, RespondPath]});
-            erater:local_async_acquire(Group, CounterName, MaxWait, {mfa, ?MODULE, sync_respond, [Ref, Responder]});
+        {responder_ack, Ref} ->
+            receiver(rq_new_ack(Rcv))
+    after
+        2000 ->
+            exit(no_responses)
+    end;
+receiver(#rcv{ack_ref = Ref, socket = Socket} = Rcv0) ->
+    {_, MQL} = process_info(self(), message_queue_len),
+    Rcv = handle_rcv_mql(MQL, Rcv0),
+    Rcv1 = receive
+        {responder_ack, Ref} ->
+            rq_new_ack(Rcv);
+        {_Proto, Socket, Data} ->
+            handle_rcv_data(Data, Rcv);
         Msg ->
-            lager:notice("server receiver unexpected message ~p", [Msg]),
-            ok
+            lager:notice("receiver ~p got unexpected message ~p", [Rcv, Msg]),
+            Rcv
     end,
-    receiver(Transport, Socket, Group, Responder, RespondPath).
+    ?MODULE:receiver(Rcv1).
+
 
 respond(pong, Ref, {Transport, Socket, _SlotMillis}) ->
     Transport:send(Socket, <<16#81:8, Ref/binary>>);
@@ -80,18 +129,29 @@ sync_respond(Response, Ref, Responder) ->
     after 1000 -> ok
     end.
 
-responder(RespondPath) ->
-    receive
+
+responder(#rsp{ack_after = AA, ack_ref = Ref, receiver = Receiver} = Rsp) when AA =< 0, Ref /= ignore ->
+    Receiver ! {responder_ack, Ref},
+    responder(Rsp#rsp{ack_ref = ignore});
+responder(#rsp{respond_path = RespondPath, ack_after = AA} = Rsp) ->
+    Rsp1 = receive
+        {ack_request, Ref} ->
+            Rsp#rsp{ack_ref = Ref, ack_after = ?ACK_AFTER};
+        {pong, Ref} ->
+            respond(pong, Ref, RespondPath),
+            Rsp;
         {erater_response, Ref, Response} when is_binary(Ref) ->
-            respond(Response, Ref, RespondPath);
+            respond(Response, Ref, RespondPath),
+            Rsp#rsp{ack_after = AA - 1};
         {erater_sync_response, Sender, Ref, Response} ->
             respond(Response, Ref, RespondPath),
-            Sender ! {ack, Ref};
+            Sender ! {ack, Ref},
+            Rsp#rsp{ack_after = AA - 1};
         Msg ->
-            lager:notice("server responder unexpected message ~p", [Msg]),
-            ok
+            lager:notice("responder responder unexpected message ~p", [Msg]),
+            Rsp
     end,
-    responder(RespondPath).
+    ?MODULE:responder(Rsp1).
 
 slots_to_millis(0, _Group) ->
     0;
@@ -128,7 +188,7 @@ handle_message(<<1:8, WaitMillis:32/integer, BinRef/binary>>) ->
     send_response({ok, WaitMillis}, BinRef).
 
 send_response(Response, BinRef) ->
-    {Pid, Ref} = binary_to_term(BinRef),
+    {Pid, Ref} = decode_pidref(BinRef),
     Pid ! {erater_response, Ref, Response}.
 
 acquire(Socket, CounterName, MaxWait) when is_binary(CounterName) ->
@@ -136,9 +196,12 @@ acquire(Socket, CounterName, MaxWait) when is_binary(CounterName) ->
     recv_acquire_response(Ref).
 
 send_acquire_request(Socket, CounterName, MaxWait) ->
-    NameLen = byte_size(CounterName),
     Ref = make_ref(),
-    BinRef = term_to_binary({self(), Ref}),
+    send_acquire_request(Socket, CounterName, MaxWait, {self(), Ref}).
+
+send_acquire_request(Socket, CounterName, MaxWait, {Pid, Ref}) ->
+    BinRef = encode_pidref(Pid, Ref),
+    NameLen = byte_size(CounterName),
     Packet = <<NameLen:16/integer, CounterName/binary, MaxWait:32/integer, BinRef/binary>>,
     ok = gen_tcp:send(Socket, Packet),
     Ref.
@@ -155,7 +218,39 @@ recv_acquire_response(Ref) ->
 
 send_ping(Socket) ->
     Ref = make_ref(),
-    BinRef = term_to_binary({self(), Ref}),
+    BinRef = encode_pidref(self(), Ref), % term_to_binary({self(), Ref}),
     Packet = <<0:16/integer, 1:16/integer, BinRef/binary>>,
     ok = gen_tcp:send(Socket, Packet),
     Ref.
+
+
+encode_pidref(Pid, Ref) ->
+    BinPid = strip_pid(Pid),
+    BinRef = strip_ref(Ref),
+    <<BinPid/binary, BinRef/binary>>.
+
+decode_pidref(<<BinPid:9/binary, BinRef/binary>>) ->
+    {restore_pid(BinPid), restore_ref(BinRef)}.
+
+strip_pid(Pid) when is_pid(Pid) ->
+    <<131, 103, NodeIdSerCrdt/binary>> = term_to_binary(Pid),
+    NodeLen = byte_size(NodeIdSerCrdt) - 9,
+    <<_:NodeLen/binary, IdSerCr/binary>> = NodeIdSerCrdt,
+    IdSerCr.
+
+restore_pid(IdSerCr) ->
+    <<131, NodeBin/binary>> = term_to_binary(node()),
+    PidBin = <<131, 103, NodeBin/binary, IdSerCr/binary>>,
+    binary_to_term(PidBin).
+
+strip_ref(Ref) when is_reference(Ref) ->
+    <<131, 114, Len:16, NodeCrId/binary>> = term_to_binary(Ref),
+    NodeLen = byte_size(NodeCrId) - Len*4 - 1,
+    <<_:NodeLen/binary, CrId/binary>> = NodeCrId,
+    CrId.
+
+restore_ref(CrId) ->
+    <<131, NodeBin/binary>> = term_to_binary(node()),
+    Len = byte_size(CrId) div 4,
+    RefBin = <<131, 114, Len:16, NodeBin/binary, CrId/binary>>,
+    binary_to_term(RefBin).
