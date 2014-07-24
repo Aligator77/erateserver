@@ -37,7 +37,7 @@ start_server(Port, PoolSize, Groups, Hooks) when is_list(Groups) ->
     Host = {'_', PathList ++ RPCList ++ [DefPath]},
     Dispatch = cowboy_router:compile([Host]),
     Opts = [{max_keepalive, 100000}, {timeout, 300000}],
-    PoolOpts = [{port, Port}, {max_connections, 100000}],
+    PoolOpts = [{ip, {0,0,0,0,0,0,0,0}}, {port, Port}, {max_connections, 100000}],
     cowboy:start_http(?MODULE, PoolSize, PoolOpts, [{env, [{dispatch, Dispatch}]}] ++ Hooks ++ Opts).
 
 configure_group({GroupName, UrlSegment, GroupConfig}) ->
