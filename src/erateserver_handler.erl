@@ -5,6 +5,8 @@
 -export([init/3]).
 -export([handle/2]).
 -export([terminate/3]).
+
+-export([increment_rq_num/0]).
  
 % init: track request number
 init(Type, Req, Options) ->

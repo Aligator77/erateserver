@@ -31,14 +31,18 @@ stop(_) ->
 start_server(_Port, _PoolSize, [], _Hooks) ->
     ignore;
 start_server(Port, PoolSize, Groups, Hooks) when is_list(Groups) ->
-    PathList = [configure_group(Group) || Group <- Groups],
-    RPCList = [configure_rpc(Group) || Group <- Groups],
-    DefPath = {'_', erateserver_handler, []},
-    Host = {'_', PathList ++ RPCList ++ [DefPath]},
-    Dispatch = cowboy_router:compile([Host]),
+    CowboyEnv = [{env, [{dispatch, make_dispatch(Groups)}]}],
     Opts = [{max_keepalive, 100000}, {timeout, 300000}],
     PoolOpts = [{ip, {0,0,0,0,0,0,0,0}}, {port, Port}, {max_connections, 100000}],
-    cowboy:start_http(?MODULE, PoolSize, PoolOpts, [{env, [{dispatch, Dispatch}]}] ++ Hooks ++ Opts).
+    cowboy:start_http(?MODULE, PoolSize, PoolOpts, CowboyEnv ++ Hooks ++ Opts).
+
+make_dispatch(Groups) ->
+    PathList = [configure_group(Group) || Group <- Groups],
+    RPCList = [configure_rpc(Group) || Group <- Groups],
+    PingPath = {"/ping", erateserver_health, ping},
+    DefPath = {'_', erateserver_handler, []},
+    Host = {'_', PathList ++ RPCList ++ [PingPath, DefPath]},
+    cowboy_router:compile([Host]).
 
 configure_group({GroupName, UrlSegment, GroupConfig}) ->
     erater:configure(GroupName, GroupConfig),
