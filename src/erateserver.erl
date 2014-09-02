@@ -31,10 +31,36 @@ stop(_) ->
 start_server(_Port, _PoolSize, [], _Hooks) ->
     ignore;
 start_server(Port, PoolSize, Groups, Hooks) when is_list(Groups) ->
+    ok = validate_groups(Groups),
     CowboyEnv = [{env, [{dispatch, make_dispatch(Groups)}]}],
     Opts = [{max_keepalive, 100000}, {timeout, 300000}],
     PoolOpts = [{ip, {0,0,0,0,0,0,0,0}}, {port, Port}, {max_connections, 100000}],
     cowboy:start_http(?MODULE, PoolSize, PoolOpts, CowboyEnv ++ Hooks ++ Opts).
+
+segment_blacklist() ->
+    ["ping", "rpc"].
+
+% Group config validation
+validate_groups([]) ->
+    ok;
+validate_groups([{Name, UrlSegment, GroupConfig}|MoreGroups]) when is_atom(Name), is_list(UrlSegment), is_list(GroupConfig) ->
+    % Seems legit. Go deeper
+    StrippedSeg = string:strip(UrlSegment, both, $/),
+    Blacklisted = lists:member(StrippedSeg, segment_blacklist()),
+    ValidConfig = (length(erater_config:clean(GroupConfig)) > 2),
+    case {Blacklisted, ValidConfig} of
+        {false, true} ->
+            validate_groups(MoreGroups); % ok
+        {true, _} ->
+            lager:critical("Blacklisted uri segment in erateserver config: ~p", [UrlSegment]),
+            {error, {blacklisted, UrlSegment}};
+        {_, false} ->
+            lager:critical("Bad config for erateserver group ~w: ~p", [Name, GroupConfig]),
+            {error, {bad_config, GroupConfig}}
+    end;
+validate_groups([BadGroup|_]) ->
+    {error, {bad_group_definition, BadGroup}}.
+
 
 make_dispatch(Groups) ->
     PathList = [configure_group(Group) || Group <- Groups],
