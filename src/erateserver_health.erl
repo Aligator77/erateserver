@@ -7,8 +7,7 @@
 -export([terminate/3]).
 
 init(_Type, Req, ping) ->
-    erateserver_handler:increment_rq_num(),
-    {ok, Req, ping}.
+    {ok, erateserver_log:start_request(Req), ping}.
 
 handle(Req, ping) ->
     {ok, Req2} = cowboy_req:reply(200, [{<<"content-type">>, <<"text/plain">>}], <<"pong\n">>, Req),
