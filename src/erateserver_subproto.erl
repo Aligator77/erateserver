@@ -62,7 +62,7 @@ do_upgrade(Req, Group) ->
 	[Socket, Transport] = cowboy_req:get([socket, transport], Req),
     Transport:setopts(Socket, [{active, true} | ?SOCK_OPTS]),
 
-    RespondPath = {Transport, Socket, slots_to_millis(1, Group)},
+    RespondPath = {Transport, Socket, 1}, % Erater automatically converts sots to milliseconds now
     Rsp = #rsp{receiver=self(), respond_path=RespondPath},
     Responder = proc_lib:spawn_opt(?MODULE, responder, [Rsp], [link]),
     Rcv = #rcv{group=Group, transport=Transport, socket=Socket, responder=Responder, respond_path = RespondPath},
@@ -152,13 +152,6 @@ responder(#rsp{respond_path = RespondPath, ack_after = AA} = Rsp) ->
             Rsp
     end,
     ?MODULE:responder(Rsp1).
-
-slots_to_millis(0, _Group) ->
-    0;
-slots_to_millis(SlotsWait, Group) ->
-    RPS = erater_group:get_config(Group, rps),
-    SlotMillis = 1000 div RPS,
-    SlotMillis * SlotsWait.
 
 
 client_connect(Host, Port, GroupID) ->
