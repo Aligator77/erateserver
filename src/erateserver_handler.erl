@@ -21,7 +21,7 @@ handle(Req0, {erater, GroupName} = State) ->
         {ok, _} ->
             cowboy_req:reply(200, [], [], Req);
         {error, overflow} ->
-            cowboy_req:reply(429, [], [], Req);
+            cowboy_req:reply(429, [{<<"Retry-After">>, <<"1">>}], [], Req);
         {error, unavailable} ->
             cowboy_req:reply(503, [], [], Req)
     end,
