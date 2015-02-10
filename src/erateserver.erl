@@ -6,6 +6,7 @@
 -export([conf/1, conf/2]).
 
 -export([start/2, stop/1]).
+-export([configure_groups/0]).
 
 conf(port) ->
     conf(port, 8080);
@@ -20,13 +21,21 @@ start() ->
     ok.
 
 start(_, _) ->
-    erateserver_config:load(conf(config)),
+    erateserver_config:load(conf(config, undefined)),
     StartResult = erateserver_sup:start_link(),
     {ok, _} = start_server(conf(port), conf(pool_size, 100), conf(groups, []), conf_hooks()),
     StartResult.
 
 stop(_) ->
     ok.
+
+%% Reconfigure erater groups
+configure_groups() ->
+    Groups = conf(groups, []),
+    ok = validate_groups(Groups),
+    _PathList = [configure_group(Group) || Group <- Groups],
+    ok.
+
 
 start_server(_Port, _PoolSize, [], _Hooks) ->
     ignore;
@@ -38,7 +47,7 @@ start_server(Port, PoolSize, Groups, Hooks) when is_list(Groups) ->
     cowboy:start_http(?MODULE, PoolSize, PoolOpts, CowboyEnv ++ Hooks ++ Opts).
 
 segment_blacklist() ->
-    ["ping", "rpc"].
+    ["ping", "rpc", "admin"].
 
 % Group config validation
 validate_groups([]) ->
@@ -65,9 +74,9 @@ validate_groups([BadGroup|_]) ->
 make_dispatch(Groups) ->
     PathList = [configure_group(Group) || Group <- Groups],
     RPCList = [configure_rpc(Group) || Group <- Groups],
-    PingPath = {"/ping", erateserver_health, ping},
+    AdminList = erateserver_admin:path_list(),
     DefPath = {'_', erateserver_handler, []},
-    Host = {'_', PathList ++ RPCList ++ [PingPath, DefPath]},
+    Host = {'_', PathList ++ RPCList ++ AdminList ++ [DefPath]},
     cowboy_router:compile([Host]).
 
 configure_group({GroupName, UrlSegment, GroupConfig}) ->
