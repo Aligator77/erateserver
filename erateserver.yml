@@ -1,0 +1,13 @@
+common:
+    cookie: "test_ers_coo"
+
+http:
+    port: 2880
+    pool_size: 30
+    log_access: true
+
+groups:
+    erate_100:
+        rps: 100
+        burst: 50
+        ttl: 20000

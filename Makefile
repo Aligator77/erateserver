@@ -1,5 +1,6 @@
 PROJECT = erateserver
 ERLC_OPTS= "+{parse_transform, lager_transform}"
+SHELL_OPTS = +P 2000000 +sbwt none +sbt ts -config sample.config
 
 DEPS = erater cowlib ranch cowboy lager yamerl
 dep_erater = git https://localhost/erater # Fake URL to avoid downloading package index
