@@ -33,8 +33,8 @@ stop(_) ->
 configure_groups() ->
     Groups = conf(groups, []),
     ok = validate_groups(Groups),
-    _PathList = [configure_group(Group) || Group <- Groups],
-    ok.
+    Dispatch = make_dispatch(Groups),
+    cowboy:set_env(?MODULE, dispatch, Dispatch).
 
 
 start_server(_Port, _PoolSize, [], _Hooks) ->
