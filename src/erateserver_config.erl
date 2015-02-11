@@ -42,5 +42,5 @@ read_group_opt("burst", Burst) when is_integer(Burst) ->
 read_group_opt("shard_count", Shards) when is_integer(Shards) ->
     {shards, Shards};
 read_group_opt("ttl", TTL) when is_integer(TTL) ->
-    {die_after, TTL}.
+    {ttl, TTL}.
 
