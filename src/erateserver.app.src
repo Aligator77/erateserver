@@ -3,7 +3,7 @@
 {application, erateserver, [
         {description, "HTTP interface for ERater, universal rate limiter"},
         {id, "ERateServer"},
-        {vsn, "0.5"},
+        {vsn, "1.2"},
         {applications, [kernel, stdlib, lager, erater, cowboy, yamerl]},
         {modules, []},
         {mod, {erateserver, []}},
