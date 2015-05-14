@@ -35,10 +35,12 @@ read_group_opts([{CKey, CValue}|Tail], Acc) ->
     {Key, Value} = read_group_opt(CKey, CValue),
     read_group_opts(Tail, lists:keystore(Key, 1, Acc, {Key, Value})).
 
-read_group_opt("rps", RPS) when is_integer(RPS) ->
+read_group_opt("rps", RPS) when is_number(RPS) ->
     {rps, RPS};
 read_group_opt("burst", Burst) when is_integer(Burst) ->
     {capacity, Burst};
+read_group_opt("default_wait", Wait) when is_integer(Wait) ->
+    {default_wait, Wait};
 read_group_opt("shard_count", Shards) when is_integer(Shards) ->
     {shards, Shards};
 read_group_opt("ttl", TTL) when is_integer(TTL) ->

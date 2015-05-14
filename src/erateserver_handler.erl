@@ -17,13 +17,14 @@ do_init(_Type, Req, [GroupName]) ->
  
 handle(Req0, {erater, GroupName} = State) ->
     {CounterName, Req} = cowboy_req:binding(counter_name, Req0),
-    {ok, Req2} = case erateserver_shard_proxy:acquire(GroupName, CounterName, 0) of
-        {ok, _} ->
-            cowboy_req:reply(200, [], [], Req);
+    {MaxWait, ClientWaits, Req1} = get_wait_args(Req, GroupName),
+    {ok, Req2} = case erateserver_shard_proxy:acquire(GroupName, CounterName, MaxWait) of
+        {ok, Wait} ->
+            wait_reply(Wait, ClientWaits, Req1);
         {error, overflow} ->
-            cowboy_req:reply(429, [{<<"Retry-After">>, <<"1">>}], [], Req);
+            cowboy_req:reply(429, [{<<"Retry-After">>, <<"1">>}], <<>>, Req1);
         {error, unavailable} ->
-            cowboy_req:reply(503, [], [], Req)
+            cowboy_req:reply(503, [], <<>>, Req1)
     end,
     {ok, Req2, State};
 
@@ -33,3 +34,33 @@ handle(Req, wrong_path = State) ->
  
 terminate(_Reason, _Req, _State) ->
     ok.
+
+
+%% Helper: parse QS to get wait info
+get_wait_args(Req0, GroupName) ->
+    {MaxWaitVal, Req1} = cowboy_req:qs_val(<<"max_wait_ms">>, Req0),
+    {ClientWaitsVal, Req2} = cowboy_req:qs_val(<<"client_waits">>, Req1),
+    {parse_maxwait(MaxWaitVal, GroupName), parse_clientwaits(ClientWaitsVal), Req2}.
+
+parse_maxwait(MaxWaitVal, _GroupName) when is_binary(MaxWaitVal) ->
+    binary_to_integer(MaxWaitVal);
+parse_maxwait(_undefined, GroupName) ->
+    erater_group:get_config(GroupName, default_wait).
+
+parse_clientwaits(<<"true">>) -> true;
+parse_clientwaits(<<"false">>) -> false;
+parse_clientwaits(true) -> true;
+parse_clientwaits(undefined) -> false.
+
+%% Waiting magic
+wait_reply(0, _, Req) ->
+    % Nothing to wait for, just return 200 now
+    cowboy_req:reply(200, [], <<>>, Req);
+wait_reply(Wait, false, Req) ->
+    % Client cannot wait, so we wait for him
+    timer:sleep(Wait),
+    cowboy_req:reply(200, [], <<>>, Req);
+wait_reply(Wait, true, Req) ->
+    % Client handles waiting itself, so pass waiting time in body KV
+    Headers = [{<<"content-type">>, <<"application/x-www-form-urlencoded">>}],
+    cowboy_req:reply(202, Headers, io_lib:format("wait_ms=~w~n", [Wait]), Req).
