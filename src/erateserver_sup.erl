@@ -31,7 +31,7 @@ proxy_spec(Group, Shard) ->
      permanent, 1000, worker, [erateserver_shard_proxy]}.
 
 init(app_root) ->
-    {ok, {{one_for_one, 10, 5}, []}};
+    {ok, {{one_for_one, 10, 5}, [erateserver_listener:child_spec()]}};
 init({proxies, Group, Shards}) ->
     ProxySpecs = [proxy_spec(Group, Shard) || Shard <- lists:seq(1, Shards)],
     {ok, {{one_for_one, 20, 1}, ProxySpecs}}.

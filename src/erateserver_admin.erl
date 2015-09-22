@@ -22,7 +22,7 @@ handle(Req, reload_config) ->
     % Reload server config file into application environment
     _ = erateserver_config:load(erateserver:conf(config)),
     % Apply fresh groups config
-    ok = erateserver:configure_groups(),
+    ok = erateserver_listener:configure_groups(),
 
     {ok, Req2} = cowboy_req:reply(200, [{<<"content-type">>, <<"text/plain">>}], <<"reconfigured\n">>, Req),
     {ok, Req2, reload_config}.
