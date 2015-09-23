@@ -79,12 +79,18 @@ init({worker, Node, Group}) ->
 
 
 handle_info(timeout, #proxy{role=master, group=Group, shard=Shard, manager=undefined} = State) ->
-    case global:whereis_name(erater_shard:name(Group, Shard)) of
+    try erater_shard:whereis_shard(Group, Shard) of
         undefined ->
             erlang:send_after(100, self(), timeout),
             {noreply, State};
         Manager ->
             {noreply, start_timer(connect(Manager, State))}
+    catch
+        % When group is unavailable (e.g. no leader)
+        Class:Reason ->
+            Stacktrace = erlang:get_stacktrace(),
+            timer:sleep(1000), % Sleep to not cause supervision tree collapse
+            erlang:raise(Class, Reason, Stacktrace)
     end;
 handle_info(timeout, #proxy{role=worker, socket=undefined, group=Group, node=Node} = State) ->
     {noreply, start_timer(connect(Node, Group, State))};
