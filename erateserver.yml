@@ -1,5 +1,10 @@
 common:
-    cookie: "test_ers_coo"
+    # Cluster may be specified either:
+    #   * as a list of erlang nodes (you may specify only name@ or @host)
+    #   * {DiscoveryModule: DiscoveryArg} -- in this case DiscoveryModule:cluster(DiscoveryArg) must return a list of nodes.
+    cluster: [ers1@, ers2@, @somenode]
+    spare_hosts: 2
+    cookie: test_ers_coo
 
 http:
     port: 2880
@@ -11,3 +16,18 @@ groups:
         rps: 100
         burst: 50
         ttl: 20000
+    slow:
+        # We can set per-group cluster and explicit shard count
+        cluster: [ers1@, ers3@, ers4@, ers5@]
+        shard_count: 2
+        # This group's couners are virtual queues of size 1:
+        rps: 0.2            # one hit per 5 seconds
+        burst: 1            # no simultaneous hits
+        default_wait: 5000  # request is blocked if needed
+    disco:
+        # Define a cluster as a call to discovery module.
+        # Here a list of nodes will be got by calling `ers_discovery:cluster([{"names",["ers1","ers2"]},{"hosts",["__myhost__","otherhost"]}])`.
+        cluster: {ers_discovery: {names: [ers1, ers2], hosts: [__myhost__, otherhost]}}
+        shard_count: 1
+        rps: 1
+        burst: 1
