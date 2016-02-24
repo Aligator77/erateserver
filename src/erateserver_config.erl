@@ -84,6 +84,10 @@ read_group_opts([{CKey, CValue}|Tail], Acc) ->
     {Key, Value} = read_group_opt(CKey, CValue),
     read_group_opts(Tail, lists:keystore(Key, 1, Acc, {Key, Value})).
 
+read_group_opt("mode", "group") ->
+    {mode, group};
+read_group_opt("mode", "adhoc") ->
+    {mode, adhoc};
 read_group_opt("rps", RPS) when is_number(RPS) ->
     {rps, RPS};
 read_group_opt("burst", Burst) when is_integer(Burst) ->

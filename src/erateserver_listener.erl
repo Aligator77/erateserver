@@ -76,7 +76,8 @@ make_dispatch(Groups) ->
 configure_group({GroupName, UrlSegment, GroupConfig}) ->
     erater:configure(GroupName, GroupConfig),
     PathMatch = "/" ++ UrlSegment ++ "/:counter_name", 
-    {PathMatch, erateserver_handler, [GroupName]}.
+    Mode = erater_config:mode(GroupConfig),
+    {PathMatch, erateserver_handler, {Mode, GroupName}}.
 
 configure_rpc({GroupName, UrlSegment, GroupConfig}) ->
     Shards = erater_config:shards(GroupConfig),

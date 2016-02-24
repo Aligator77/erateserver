@@ -31,3 +31,6 @@ groups:
         shard_count: 1
         rps: 1
         burst: 1
+    adhoc:
+        mode: adhoc
+        shard_count: 1
