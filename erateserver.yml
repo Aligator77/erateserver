@@ -33,4 +33,3 @@ groups:
         burst: 1
     adhoc:
         mode: adhoc
-        shard_count: 1
