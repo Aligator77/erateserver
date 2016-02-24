@@ -12,21 +12,22 @@ init(Type, Req, Options) ->
 
 do_init(_Type, Req, []) ->
     {ok, Req, wrong_path};
-do_init(_Type, Req, [GroupName]) ->
-    {ok, Req, {erater, GroupName}}.
+do_init(_Type, Req, {Mode, GroupName}) ->
+    {ok, Req, {erater, Mode, GroupName}}.
  
-handle(Req0, {erater, GroupName} = State) ->
+handle(Req0, {erater, Mode, GroupName} = State) ->
     {CounterName, Req} = cowboy_req:binding(counter_name, Req0),
     {MaxWait, ClientWaits, Req1} = get_wait_args(Req, GroupName),
-    {ok, Req2} = case erateserver_shard_proxy:acquire(GroupName, CounterName, MaxWait) of
+    {AcqOptions, ReqParsed} = get_acq_options(Req1, Mode),
+    {ok, ReqFinal} = case erateserver_shard_proxy:acquire(GroupName, CounterName, MaxWait, AcqOptions) of
         {ok, Wait} ->
-            wait_reply(Wait, ClientWaits, Req1);
+            wait_reply(Wait, ClientWaits, ReqParsed);
         {error, overflow} ->
-            cowboy_req:reply(429, [{<<"Retry-After">>, <<"1">>}], <<>>, Req1);
+            cowboy_req:reply(429, [{<<"Retry-After">>, <<"1">>}], <<>>, ReqParsed);
         {error, unavailable} ->
-            cowboy_req:reply(503, [], <<>>, Req1)
+            cowboy_req:reply(503, [], <<>>, ReqParsed)
     end,
-    {ok, Req2, State};
+    {ok, ReqFinal, State};
 
 handle(Req, wrong_path = State) ->
     {ok, Req2} = cowboy_req:reply(404, [{<<"content-type">>, <<"text/plain">>}], <<"Wrong URI path!\n">>, Req),
@@ -51,6 +52,36 @@ parse_clientwaits(<<"true">>) -> true;
 parse_clientwaits(<<"false">>) -> false;
 parse_clientwaits(true) -> true;
 parse_clientwaits(undefined) -> false.
+
+
+%% Parse ad-hoc options when needed
+get_acq_options(Req, adhoc) ->
+    lists:foldl(fun get_adhoc_option/2, {[], Req}, [rps, burst, ttl]);
+get_acq_options(Req, _) ->
+    {[], Req}.
+
+get_adhoc_option(Key, {KVs, Req}) ->
+    BinKey = atom_to_binary(Key, latin1),
+    {BinValue, Req1} =  cowboy_req:qs_val(BinKey, Req, undefined),
+    AddKVs = case {Key, BinValue} of
+        {_, BadValue} when BadValue == undefined; BadValue == true ->
+            [];
+        {rps, BinRPS} ->
+            Value = binary_to_number(BinRPS),
+            [{rps, Value}];
+        {_, BinValue} ->
+            Value = binary_to_integer(BinValue),
+            [{Key, Value}]
+    end,
+    {AddKVs ++ KVs, Req1}.
+
+%% Helper: parse integer or float
+binary_to_number(Bin) ->
+    case binary:match(Bin, <<".">>) of
+        nomatch -> binary_to_integer(Bin);
+        {_, _} -> binary_to_float(Bin)
+    end.
+
 
 %% Waiting magic
 wait_reply(0, _, Req) ->

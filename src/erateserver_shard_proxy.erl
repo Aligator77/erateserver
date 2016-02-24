@@ -1,6 +1,6 @@
 -module(erateserver_shard_proxy).
 -export([start_link/2, start_link_worker/2]).
--export([acquire/3]).
+-export([acquire/4]).
 
 -behavior(gen_server).
 -export([init/1, handle_info/2, handle_cast/2, handle_call/3, code_change/3, terminate/2]).
@@ -17,40 +17,40 @@ start_link(Group, Shard) ->
 start_link_worker(Node, Group) ->
     gen_server:start_link(?MODULE, {worker, Node, Group}, []).
 
-acquire(Group, CounterName, MaxWait) ->
+acquire(Group, CounterName, MaxWait, Options) ->
     case erater_shard:shard(Group, CounterName) of
-        undefined -> erater:local_acquire(Group, CounterName, MaxWait);
-        Shard -> remote_acquire(Group, Shard, CounterName, MaxWait)
+        undefined -> erater:local_acquire(Group, CounterName, MaxWait, Options);
+        Shard -> remote_acquire(Group, Shard, CounterName, MaxWait, Options)
     end.
 
-remote_acquire(Group, Shard, CounterName, MaxWait) ->
+remote_acquire(Group, Shard, CounterName, MaxWait, Options) ->
     case gproc:lookup_value(name(Group, Shard)) of
         undefined ->
             {error, unavailable};
         {_Manager, local} ->
-            erater:local_acquire(Group, CounterName, MaxWait);
+            erater:local_acquire(Group, CounterName, MaxWait, Options);
         {_Manager, native} ->
-            erater:acquire(Group, CounterName, MaxWait);
+            erater:acquire(Group, CounterName, MaxWait, Options);
         {_Manager, Route} ->
-            route_acquire(Route, CounterName, MaxWait)
+            route_acquire(Route, CounterName, MaxWait, Options)
     end.
 
-route_acquire(Socket, CounterName, MaxWait) when is_port(Socket) ->
-    erateserver_subproto:acquire(Socket, CounterName, MaxWait);
-route_acquire(Proxy, CounterName, MaxWait) when is_pid(Proxy) ->
-    erater_proxy:acquire(Proxy, CounterName, MaxWait);
-route_acquire({worker, Worker}, CounterName, MaxWait) ->
+route_acquire(Socket, CounterName, MaxWait, Options) when is_port(Socket) ->
+    erateserver_subproto:acquire(Socket, CounterName, MaxWait, Options);
+route_acquire(Proxy, CounterName, MaxWait, Options) when is_pid(Proxy) ->
+    erater_proxy:acquire(Proxy, CounterName, MaxWait, Options);
+route_acquire({worker, Worker}, CounterName, MaxWait, Options) ->
     Ref = make_ref(),
-    ok = gen_server:call(Worker, {send_async_acquire, CounterName, MaxWait, {self(), Ref}}),
+    ok = gen_server:call(Worker, {send_acquire, CounterName, MaxWait, [{async, {self(), Ref}} | Options]}),
     receive {erater_response, Ref, Result} -> Result
     after 5000 -> error(acquire_timeout)
     end;
 
-route_acquire(Pool, CounterName, MaxWait) when is_tuple(Pool) ->
+route_acquire(Pool, CounterName, MaxWait, Options) when is_tuple(Pool) ->
     Size = size(Pool),
     {_, _, Usec} = os:timestamp(),
     Selected = ((Usec div 7) rem Size) + 1,
-    route_acquire(element(Selected, Pool), CounterName, MaxWait).
+    route_acquire(element(Selected, Pool), CounterName, MaxWait, Options).
 
 
 -record(proxy, {
