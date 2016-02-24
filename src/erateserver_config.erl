@@ -87,7 +87,7 @@ read_group_opts([{CKey, CValue}|Tail], Acc) ->
 read_group_opt("rps", RPS) when is_number(RPS) ->
     {rps, RPS};
 read_group_opt("burst", Burst) when is_integer(Burst) ->
-    {capacity, Burst};
+    {burst, Burst};
 read_group_opt("default_wait", Wait) when is_integer(Wait) ->
     {default_wait, Wait};
 read_group_opt("cluster", ClusterCfg) ->
